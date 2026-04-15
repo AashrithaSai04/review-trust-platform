@@ -31,16 +31,21 @@ class PredictionResponse(BaseModel):
         description="List of [token, score] pairs sorted by importance"
     )
     prediction_id: Optional[str] = Field(None, description="MongoDB document ID")
+    is_mock_prediction: bool = Field(
+        default=False,
+        description="True if prediction is from fallback mock model (Torch/Transformers not available). False = real trained classifier."
+    )
 
     model_config = {
         "json_schema_extra": {
             "example": {
-                "text": "Best product ever!!!",
-                "fake_probability": 0.82,
-                "trust_score": 18,
-                "risk_level": "High Risk",
-                "important_words": [["best", 0.91], ["ever", 0.85], ["product", 0.72]],
+                "text": "This product works great and arrived quickly!",
+                "fake_probability": 0.18,
+                "trust_score": 82,
+                "risk_level": "Low Risk",
+                "important_words": [["great", 0.89], ["quickly", 0.81], ["product", 0.72]],
                 "prediction_id": "64abc123def456",
+                "is_mock_prediction": False,
             }
         }
     }

@@ -16,6 +16,24 @@ router = APIRouter()
 MAX_BATCH_SIZE = 500
 
 
+def get_text_column(df: pd.DataFrame) -> pd.Series:
+    """Return the first matching text column from a CSV upload."""
+    possible_cols = [
+        "text",
+        "review",
+        "review_text",
+        "summary",
+        "reviews.text",
+        "reviews.title",
+    ]
+
+    for col in possible_cols:
+        if col in df.columns:
+            return df[col]
+
+    raise ValueError(f"No valid text column found. Available: {df.columns.tolist()}")
+
+
 @router.post("/upload", response_model=BatchSummary, summary="Batch process a CSV of reviews")
 async def upload_csv(
     file: UploadFile = File(..., description="CSV file with a 'text' column"),
@@ -39,13 +57,14 @@ async def upload_csv(
         raise HTTPException(status_code=400, detail=f"Failed to parse CSV: {e}")
 
     if text_column not in df.columns:
-        available = list(df.columns)
-        raise HTTPException(
-            status_code=422,
-            detail=f"Column '{text_column}' not found. Available columns: {available}",
-        )
+        try:
+            texts_series = get_text_column(df)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+    else:
+        texts_series = df[text_column]
 
-    texts = df[text_column].dropna().astype(str).tolist()
+    texts = texts_series.dropna().astype(str).tolist()
     if len(texts) == 0:
         raise HTTPException(status_code=422, detail="No valid text rows found in CSV.")
 

@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.database.mongo import connect_mongo, close_mongo
 from app.routes import predict, upload, moderation, explain   # noqa: E402
 from app.utils.logger import get_logger
@@ -34,7 +35,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-slate-900 bg-gradient-to-br from-slate-900 via-[#1a0f2e] to-slate-900 text-slate-300 min-h-screen background-animate;
+  }
+}
+
+@layer utilities {
+  .glass-card {
+    @apply backdrop-blur-xl bg-white/5 border border-white/10 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.12)];
+  }
+}
+
+.background-animate {
+  background-size: 400%;
+  animation: AnimationName 15s ease infinite;
+}
+
+@keyframes AnimationName {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}

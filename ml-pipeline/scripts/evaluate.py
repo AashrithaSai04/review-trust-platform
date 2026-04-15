@@ -17,8 +17,9 @@ from sklearn.model_selection import train_test_split
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-DATA_PATH = Path("../data/cleaned_reviews.csv")
-MODEL_DIR = Path("../models/distilbert-review-classifier")
+PIPELINE_ROOT = Path(__file__).resolve().parents[1]
+DATA_PATH = PIPELINE_ROOT / "data" / "cleaned_reviews.csv"
+MODEL_DIR = PIPELINE_ROOT / "my_model"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 MAX_LENGTH = 256

@@ -24,6 +24,7 @@ def run_prediction(text: str, xai_method: str = "attention") -> PredictionRespon
     # 1. Inference
     model_output = model_service.predict(text)
     fake_prob = model_output["fake_probability"]
+    is_mock = model_output.get("is_mock", False)
 
     # 2. Trust + risk
     trust = build_trust_result(fake_prob)
@@ -40,6 +41,7 @@ def run_prediction(text: str, xai_method: str = "attention") -> PredictionRespon
         "risk_level": trust["risk_level"],
         "important_words": important_words,
         "xai_method": xai_method,
+        "is_mock_prediction": is_mock,
     }
     prediction_id = save_prediction(record)
 
@@ -51,4 +53,5 @@ def run_prediction(text: str, xai_method: str = "attention") -> PredictionRespon
         risk_level=trust["risk_level"],
         important_words=important_words,
         prediction_id=prediction_id,
+        is_mock_prediction=is_mock,
     )

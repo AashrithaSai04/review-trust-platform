@@ -3,11 +3,10 @@ Model Service — loads the trained DistilBERT model and runs inference.
 Singleton pattern ensures the model is loaded once at startup.
 """
 
-import numpy as np
-import torch
 from pathlib import Path
 from typing import Optional
-from transformers import DistilBertTokenizerFast, DistilBertForSequenceClassification
+
+import numpy as np
 
 from app.config import settings
 from app.utils.logger import get_logger
@@ -23,11 +22,27 @@ class ModelService:
     def __new__(cls) -> "ModelService":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._tokenizer = None
+            cls._instance._model = None
             cls._instance._loaded = False
+            cls._instance._is_mock = False
         return cls._instance
 
     def load(self) -> None:
         if self._loaded:
+            return
+
+        try:
+            import torch
+            from transformers import DistilBertForSequenceClassification, DistilBertTokenizerFast
+        except ImportError as exc:
+            logger.warning(
+                f"Model dependencies are not installed ({exc}). Using mock predictions."
+            )
+            self._tokenizer = None
+            self._model = None
+            self._is_mock = True
+            self._loaded = True
             return
 
         model_path = Path(settings.model_dir)
@@ -38,6 +53,7 @@ class ModelService:
             )
             self._tokenizer = None
             self._model = None
+            self._is_mock = True
             self._loaded = True
             return
 
@@ -51,6 +67,7 @@ class ModelService:
         self._device = torch.device(settings.device)
         self._model.to(self._device)
         self._model.eval()
+        self._is_mock = False
         self._loaded = True
         logger.info(f"Model loaded on {self._device}")
 
@@ -63,11 +80,14 @@ class ModelService:
               - fake_probability (float)
               - attention_weights (list[float]) — per-token attention scores
               - tokens (list[str])
+              - is_mock (bool) — True if using fallback mock model
         """
         self.load()
 
         if self._model is None:
-            return self._mock_predict(text)
+            result = self._mock_predict(text)
+            result["is_mock"] = True
+            return result
 
         inputs = self._tokenizer(
             text,
@@ -99,6 +119,7 @@ class ModelService:
             "fake_probability": fake_probability,
             "attention_weights": attention_weights,
             "tokens": tokens,
+            "is_mock": False,
         }
 
     def _mock_predict(self, text: str) -> dict:

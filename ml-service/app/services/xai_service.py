@@ -5,6 +5,7 @@ Architecture is designed so SHAP/LIME can be plugged in later
 via the ExplainerRegistry without changing the API layer.
 """
 
+import re
 import numpy as np
 from app.config import settings
 from app.utils.logger import get_logger
@@ -13,6 +14,11 @@ logger = get_logger(__name__)
 
 # Tokens to filter out of explanations
 SPECIAL_TOKENS = {"[CLS]", "[SEP]", "[PAD]", "[UNK]", "<s>", "</s>"}
+
+
+def _is_meaningful_token(token: str) -> bool:
+    """Keep tokens that contain at least one alphanumeric character."""
+    return bool(re.search(r"[A-Za-z0-9]", token))
 
 
 def extract_important_words(
@@ -40,11 +46,14 @@ def extract_important_words(
         tokens = tokens[:min_len]
         attention_weights = attention_weights[:min_len]
 
-    # Filter special tokens and sub-word markers (## prefix)
+    # Filter special tokens, sub-word markers, and punctuation-only artifacts.
     filtered = [
-        (tok.replace("##", ""), score)
+        (clean_tok, score)
         for tok, score in zip(tokens, attention_weights)
-        if tok not in SPECIAL_TOKENS and not tok.startswith("[")
+        for clean_tok in [tok.replace("##", "").strip()]
+        if tok not in SPECIAL_TOKENS
+        and not tok.startswith("[")
+        and _is_meaningful_token(clean_tok)
     ]
 
     if not filtered:
