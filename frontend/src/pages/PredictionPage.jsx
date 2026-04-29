@@ -10,15 +10,15 @@ const PredictionPage = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const handlePredict = async (text) => {
+  const handlePredict = async (text, verifiedPurchase = false) => {
     setIsLoading(true);
     setError(null);
     setResult(null);
     try {
-      const data = await predictReview(text);
+      const data = await predictReview(text, verifiedPurchase);
       setResult(data);
     } catch (err) {
-      setError('Failed to analyze the review. Please try again later.');
+      setError(err?.message || 'Failed to analyze the review. Please try again later.');
     } finally {
       setIsLoading(false);
     }
@@ -37,6 +37,12 @@ const PredictionPage = () => {
     initial: { opacity: 0, y: 20 },
     in: { opacity: 1, y: 0 },
     out: { opacity: 0, y: -20 }
+  };
+
+  const getTopContributions = (featureContributions = {}, limit = 3) => {
+    return Object.entries(featureContributions)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit);
   };
 
   return (
@@ -120,8 +126,69 @@ const PredictionPage = () => {
                   </div>
                 </div>
 
+                {/* Why this label */}
+                <div className="mb-8 p-6 glass-card bg-black/20 border border-white/10">
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <h4 className="text-sm font-semibold text-purple-300/80 uppercase tracking-widest">Why This Label?</h4>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-gray-400">{result.label || result.risk_level}</span>
+                      <span className="text-xs text-gray-500">|</span>
+                      <span className="text-xs text-gray-400">Score {result.score ?? result.trust_score}</span>
+                    </div>
+                  </div>
+
+                  <p className="text-sm text-gray-200 leading-relaxed mb-4">
+                    {result.explanation || 'No explanation available for this prediction.'}
+                  </p>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="rounded-lg border border-white/10 bg-black/25 p-4">
+                      <p className="text-xs uppercase tracking-wider text-gray-400 mb-3">Top Feature Contributions</p>
+                      {getTopContributions(result.feature_contributions).length === 0 ? (
+                        <p className="text-sm text-gray-500">No contribution details available.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {getTopContributions(result.feature_contributions).map(([feature, value]) => (
+                            <div key={feature} className="flex items-center justify-between gap-3 text-sm">
+                              <span className="text-gray-200 truncate">{feature}</span>
+                              <span className="text-emerald-300 font-semibold">{(value * 100).toFixed(1)}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-lg border border-white/10 bg-black/25 p-4">
+                      <p className="text-xs uppercase tracking-wider text-gray-400 mb-3">Important Phrases</p>
+                      {!result.important_phrases || result.important_phrases.length === 0 ? (
+                        <p className="text-sm text-gray-500">No phrase-level context available.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {result.important_phrases.slice(0, 3).map((phrase, idx) => (
+                            <p key={`${idx}-${phrase.slice(0, 16)}`} className="text-sm text-gray-200 leading-relaxed">
+                              "{phrase}"
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {typeof result.calibrated_fake_probability === 'number' && (
+                    <p className="mt-4 text-xs text-gray-400">
+                      Calibrated fake probability: {(result.calibrated_fake_probability * 100).toFixed(1)}% 
+                      {result.verified_purchase ? ' (verified-purchase calibration applied)' : ''}
+                    </p>
+                  )}
+                </div>
+
                 {/* Highlight text */}
                 <div className="flex-1 flex flex-col">
+                  {result.is_mock_prediction && (
+                    <div className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-amber-200 text-sm">
+                      Running in mock prediction mode. Install/load the trained model in the API runtime for reliable risk scores and token importance.
+                    </div>
+                  )}
                   <h4 className="text-sm font-semibold text-purple-300/80 uppercase tracking-widest mb-3">Contextual Analysis</h4>
                   <div className="flex-1 glass-card bg-black/30 p-6 !rounded-xl overflow-y-auto max-h-[300px] border border-white/10 shadow-inner">
                     <HighlightText text={result.text} importantWords={result.important_words} />

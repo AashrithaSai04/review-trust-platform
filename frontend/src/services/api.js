@@ -20,20 +20,26 @@ const extractErrorMessage = (error, fallback) => {
   return error?.message || fallback;
 };
 
-export const predictReview = async (text) => {
+export const predictReview = async (text, verifiedPurchase = false) => {
   try {
-    const response = await apiClient.post('/predict', { text });
+    const response = await apiClient.post('/predict', {
+      text,
+      verified_purchase: verifiedPurchase,
+    });
     return response.data;
   } catch (error) {
     throw new Error(extractErrorMessage(error, 'Failed to analyze review.'));
   }
 };
 
-export const uploadCSV = async (file) => {
+export const uploadCSV = async (file, xaiMethod = 'attention') => {
   try {
     const formData = new FormData();
     formData.append('file', file);
     const response = await apiClient.post('/upload', formData, {
+      params: {
+        xai_method: xaiMethod,
+      },
       headers: {
         'Content-Type': 'multipart/form-data',
       },

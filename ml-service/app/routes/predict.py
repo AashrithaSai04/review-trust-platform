@@ -22,7 +22,11 @@ async def predict(request: ReviewRequest) -> PredictionResponse:
     - **important_words**: top tokens driving the prediction
     """
     try:
-        result = run_prediction(text=request.text, xai_method="attention")
+        result = run_prediction(
+            text=request.text,
+            xai_method="attention",
+            verified_purchase=request.verified_purchase,
+        )
         return result
     except Exception as e:
         logger.error(f"Prediction failed: {e}", exc_info=True)

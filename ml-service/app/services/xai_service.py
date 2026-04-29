@@ -8,17 +8,38 @@ via the ExplainerRegistry without changing the API layer.
 import re
 import numpy as np
 from app.config import settings
+from app.services.model_service import model_service
+from app.services.shap_service import compute_shap_values, is_shap_available
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 # Tokens to filter out of explanations
 SPECIAL_TOKENS = {"[CLS]", "[SEP]", "[PAD]", "[UNK]", "<s>", "</s>"}
+STOPWORDS = {
+    "a", "an", "the", "and", "or", "but", "if", "then", "than", "to", "of", "in",
+    "on", "for", "at", "by", "with", "from", "as", "is", "are", "was", "were", "be",
+    "been", "being", "it", "its", "this", "that", "these", "those", "i", "you", "he",
+    "she", "we", "they", "me", "my", "mine", "your", "yours", "our", "ours", "their",
+    "theirs", "him", "her", "them", "do", "does", "did", "not", "no", "yes", "so",
+    "very", "can", "could", "would", "should", "will", "just", "only", "also", "any",
+}
 
 
 def _is_meaningful_token(token: str) -> bool:
-    """Keep tokens that contain at least one alphanumeric character."""
-    return bool(re.search(r"[A-Za-z0-9]", token))
+    """Keep tokens that are informative and not common stopwords."""
+    if not token or not re.search(r"[A-Za-z0-9]", token):
+        return False
+
+    normalized = token.lower().strip()
+    if normalized in STOPWORDS:
+        return False
+
+    # Keep single-char tokens only if they are numeric (e.g., rating stars like "3")
+    if len(normalized) == 1 and not normalized.isdigit():
+        return False
+
+    return True
 
 
 def extract_important_words(
@@ -46,28 +67,38 @@ def extract_important_words(
         tokens = tokens[:min_len]
         attention_weights = attention_weights[:min_len]
 
-    # Filter special tokens, sub-word markers, and punctuation-only artifacts.
-    filtered = [
-        (clean_tok, score)
-        for tok, score in zip(tokens, attention_weights)
-        for clean_tok in [tok.replace("##", "").strip()]
-        if tok not in SPECIAL_TOKENS
-        and not tok.startswith("[")
-        and _is_meaningful_token(clean_tok)
-    ]
+    # Filter special tokens, sub-word markers, punctuation artifacts, and stopwords.
+    filtered = []
+    for tok, score in zip(tokens, attention_weights):
+        clean_tok = tok.replace("##", "").strip()
+        if tok in SPECIAL_TOKENS or tok.startswith("["):
+            continue
+        if not _is_meaningful_token(clean_tok):
+            continue
+        filtered.append((clean_tok, float(score)))
 
     if not filtered:
         return []
 
+    # Merge duplicate tokens by keeping the maximum attention score per token.
+    merged_by_token: dict[str, tuple[str, float]] = {}
+    for tok, score in filtered:
+        key = tok.lower()
+        current = merged_by_token.get(key)
+        if current is None or score > current[1]:
+            merged_by_token[key] = (tok, score)
+
+    merged = list(merged_by_token.values())
+
     # Normalize scores to [0, 1]
-    scores = np.array([s for _, s in filtered], dtype=float)
+    scores = np.array([s for _, s in merged], dtype=float)
     score_max = scores.max()
     if score_max > 0:
         scores = scores / score_max
 
     # Sort by importance and return top-k
     ranked = sorted(
-        [(tok, round(float(sc), 4)) for (tok, _), sc in zip(filtered, scores)],
+        [(tok, round(float(sc), 4)) for (tok, _), sc in zip(merged, scores)],
         key=lambda x: x[1],
         reverse=True,
     )
@@ -116,21 +147,45 @@ def attention_explainer(text: str, model_output: dict, top_k: int = None) -> dic
 
 @ExplainerRegistry.register("shap")
 def shap_explainer(text: str, model_output: dict, top_k: int = None) -> dict:
-    """
-    SHAP-based explanation — placeholder for future integration.
+    """SHAP-based explanation (fully implemented when `shap` is installed)."""
+    if top_k is None:
+        top_k = settings.top_k_attention_tokens
 
-    To implement:
-        pip install shap
-        explainer = shap.Explainer(model_pipeline)
-        shap_values = explainer([text])
-        # Extract token-level SHAP values and return ranked list
-    """
+    if not is_shap_available():
+        return {
+            "method": "shap",
+            "important_words": [],
+            "explanation_note": (
+                "SHAP package is not installed in this environment. "
+                "Install `shap` in ml-service to enable SHAP explanations."
+            ),
+        }
+
+    model_service.load()
+    if model_service._tokenizer is None:
+        return {
+            "method": "shap",
+            "important_words": [],
+            "explanation_note": (
+                "Tokenizer/model unavailable. SHAP requires the trained transformer model "
+                "to be loaded successfully."
+            ),
+        }
+
+    important_words = compute_shap_values(
+        text=text,
+        predict_proba_fn=model_service.predict_proba,
+        tokenizer=model_service._tokenizer,
+        top_k=top_k,
+        class_index=1,
+    )
+
     return {
         "method": "shap",
-        "important_words": [],
+        "important_words": important_words,
         "explanation_note": (
-            "SHAP integration is scaffolded but not yet implemented. "
-            "Install `shap` and implement the shap_explainer function in xai_service.py."
+            "Token importance derived from SHAP values for the FAKE class probability. "
+            "Scores are absolute SHAP contributions normalized to [0, 1]."
         ),
     }
 

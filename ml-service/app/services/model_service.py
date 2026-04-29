@@ -5,6 +5,8 @@ Singleton pattern ensures the model is loaded once at startup.
 
 from pathlib import Path
 from typing import Optional
+import hashlib
+import re
 
 import numpy as np
 
@@ -89,6 +91,8 @@ class ModelService:
             result["is_mock"] = True
             return result
 
+        import torch
+
         inputs = self._tokenizer(
             text,
             truncation=True,
@@ -122,16 +126,85 @@ class ModelService:
             "is_mock": False,
         }
 
+    def predict_proba(self, texts: list[str]) -> np.ndarray:
+        """
+        Return class probabilities for a batch of texts.
+
+        Shape: (N, 2) for classes [REAL, FAKE].
+        """
+        self.load()
+
+        if isinstance(texts, str):
+            batch_texts = [texts]
+        elif isinstance(texts, np.ndarray):
+            batch_texts = [str(item) for item in texts.reshape(-1).tolist()]
+        elif isinstance(texts, (list, tuple)):
+            batch_texts = []
+            for item in texts:
+                if isinstance(item, (list, tuple, np.ndarray)):
+                    flattened = np.asarray(item).reshape(-1).tolist()
+                    batch_texts.append(" ".join(str(part) for part in flattened if str(part).strip()))
+                else:
+                    batch_texts.append(str(item))
+        else:
+            batch_texts = [str(texts)]
+
+        if self._model is None:
+            probs = []
+            for text in batch_texts:
+                mock = self._mock_predict(text)
+                fake = float(mock["fake_probability"])
+                probs.append([1.0 - fake, fake])
+            return np.array(probs, dtype=float)
+
+        import torch
+
+        inputs = self._tokenizer(
+            batch_texts,
+            truncation=True,
+            padding=True,
+            max_length=settings.max_length,
+            return_tensors="pt",
+        ).to(self._device)
+
+        with torch.no_grad():
+            outputs = self._model(**inputs)
+
+        return torch.softmax(outputs.logits, dim=-1).cpu().numpy()
+
     def _mock_predict(self, text: str) -> dict:
-        """Fallback mock when model is not trained yet."""
+        """Fallback mock when model is not trained yet.
+
+        Uses deterministic scoring based on normalized text content so small
+        formatting differences (extra spaces/newlines) do not produce wildly
+        different outputs between UI and direct API requests.
+        """
         import random
-        random.seed(len(text))
-        fake_prob = random.uniform(0.1, 0.95)
-        seq_len = min(len(text.split()) + 2, 20)
-        tokens = ["[CLS]"] + text.split()[:seq_len - 2] + ["[SEP]"]
-        weights = [random.uniform(0.01, 0.15) for _ in tokens]
+
+        normalized = " ".join(str(text).split())
+        semantic_key = re.sub(r"[^a-z0-9\s]", "", normalized.lower())
+        seed_hex = hashlib.sha256(semantic_key.encode("utf-8")).hexdigest()[:16]
+        rng = random.Random(int(seed_hex, 16))
+
+        # Keep mock probability in a realistic range but deterministic.
+        fake_prob = 0.15 + (0.65 * rng.random())
+
+        base_tokens = normalized.split()
+        seq_len = min(len(base_tokens) + 2, 20)
+        tokens = ["[CLS]"] + base_tokens[:seq_len - 2] + ["[SEP]"]
+
+        weights: list[float] = []
+        for tok in tokens:
+            if tok in {"[CLS]", "[SEP]"}:
+                weights.append(0.01)
+                continue
+            token_key = re.sub(r"[^a-z0-9]", "", tok.lower())
+            token_bonus = min(max(len(token_key), 1), 12) / 120.0
+            jitter = rng.uniform(0.01, 0.08)
+            weights.append(min(0.2, 0.03 + token_bonus + jitter))
+
         return {
-            "fake_probability": fake_prob,
+            "fake_probability": float(fake_prob),
             "attention_weights": weights,
             "tokens": tokens,
         }

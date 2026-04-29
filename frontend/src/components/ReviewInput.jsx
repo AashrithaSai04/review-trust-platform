@@ -4,11 +4,12 @@ import { motion } from 'framer-motion';
 
 const ReviewInput = ({ onSubmit, isLoading }) => {
   const [text, setText] = useState('');
+  const [verifiedPurchase, setVerifiedPurchase] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (text.trim() && !isLoading) {
-      onSubmit(text);
+      onSubmit(text, verifiedPurchase);
     }
   };
 
@@ -46,6 +47,17 @@ const ReviewInput = ({ onSubmit, isLoading }) => {
             )}
           </button>
         </div>
+
+        <label className="absolute bottom-6 left-6 flex items-center gap-2 text-sm text-gray-300 select-none">
+          <input
+            type="checkbox"
+            checked={verifiedPurchase}
+            onChange={(e) => setVerifiedPurchase(e.target.checked)}
+            disabled={isLoading}
+            className="h-4 w-4 rounded border-white/20 bg-black/40 text-emerald-500 focus:ring-emerald-500"
+          />
+          Verified purchase
+        </label>
       </motion.div>
     </form>
   );

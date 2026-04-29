@@ -6,6 +6,7 @@ import { UploadCloud, File, AlertCircle, Loader2 } from 'lucide-react';
 
 const UploadPage = () => {
   const [file, setFile] = useState(null);
+  const [xaiMethod, setXaiMethod] = useState('attention');
   const [results, setResults] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -42,7 +43,7 @@ const UploadPage = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await uploadCSV(file);
+      const data = await uploadCSV(file, xaiMethod);
       setResults(data);
     } catch (err) {
       setError(err.message || 'Failed to process the uploaded file. Please try again.');
@@ -114,6 +115,22 @@ const UploadPage = () => {
             )}
 
             <div className="mt-8 flex justify-center">
+               <div className="w-full max-w-md mb-6">
+                 <label htmlFor="xai-method" className="block text-sm font-semibold text-gray-300 mb-2 text-center">Explanation Method</label>
+                 <select
+                   id="xai-method"
+                   value={xaiMethod}
+                   onChange={(e) => setXaiMethod(e.target.value)}
+                   className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white focus:outline-none focus:border-purple-500/50 focus:ring-2 focus:ring-purple-500/20"
+                 >
+                   <option value="attention" className="text-black">Attention</option>
+                   <option value="shap" className="text-black">SHAP</option>
+                 </select>
+                 <p className="text-xs text-gray-500 mt-2 text-center">SHAP can be slower but usually gives more meaningful token importance.</p>
+               </div>
+            </div>
+
+            <div className="flex justify-center">
                <button
                   onClick={(e) => { e.stopPropagation(); processFile(); }}
                   disabled={!file || isLoading}

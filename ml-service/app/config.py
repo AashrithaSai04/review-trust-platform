@@ -51,6 +51,9 @@ class Settings:
     # Trust Score thresholds (fake_probability ranges)
     high_risk_threshold: float = float(os.getenv("HIGH_RISK_THRESHOLD", "0.7"))
     medium_risk_threshold: float = float(os.getenv("MEDIUM_RISK_THRESHOLD", "0.4"))
+    verified_review_probability_discount: float = float(
+        os.getenv("VERIFIED_REVIEW_PROBABILITY_DISCOUNT", "0.2")
+    )
 
     # XAI
     top_k_attention_tokens: int = int(os.getenv("TOP_K_TOKENS", "10"))

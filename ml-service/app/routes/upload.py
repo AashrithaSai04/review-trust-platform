@@ -8,12 +8,20 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Query
 
 from app.schemas.review import BatchSummary, PredictionResponse
 from app.services.prediction_orchestrator import run_prediction
+from app.services.xai_service import ExplainerRegistry
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 router = APIRouter()
 
 MAX_BATCH_SIZE = 500
+
+VERIFIED_COLUMNS = [
+    "verified_purchase",
+    "is_verified",
+    "verified",
+    "amazon_verified",
+]
 
 
 def get_text_column(df: pd.DataFrame) -> pd.Series:
@@ -34,10 +42,29 @@ def get_text_column(df: pd.DataFrame) -> pd.Series:
     raise ValueError(f"No valid text column found. Available: {df.columns.tolist()}")
 
 
+def _to_bool(value) -> bool:
+    if pd.isna(value):
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    normalized = str(value).strip().lower()
+    return normalized in {"1", "true", "yes", "y", "verified"}
+
+
+def get_verified_column(df: pd.DataFrame) -> pd.Series:
+    for col in VERIFIED_COLUMNS:
+        if col in df.columns:
+            return df[col]
+    return pd.Series([False] * len(df), index=df.index)
+
+
 @router.post("/upload", response_model=BatchSummary, summary="Batch process a CSV of reviews")
 async def upload_csv(
     file: UploadFile = File(..., description="CSV file with a 'text' column"),
     text_column: str = Query(default="text", description="Column name containing review text"),
+    xai_method: str = Query(default="attention", description="XAI method: 'attention' | 'shap' | 'lime'"),
 ) -> BatchSummary:
     """
     Upload a CSV file and get trust scores for all reviews.
@@ -64,23 +91,63 @@ async def upload_csv(
     else:
         texts_series = df[text_column]
 
-    texts = texts_series.dropna().astype(str).tolist()
-    if len(texts) == 0:
+    verified_series = get_verified_column(df)
+
+    records = []
+    for idx, value in texts_series.items():
+        if pd.isna(value):
+            continue
+        records.append(
+            {
+                "text": str(value),
+                "verified_purchase": _to_bool(verified_series.loc[idx]) if idx in verified_series.index else False,
+            }
+        )
+
+    if len(records) == 0:
         raise HTTPException(status_code=422, detail="No valid text rows found in CSV.")
 
-    if len(texts) > MAX_BATCH_SIZE:
-        logger.warning(f"CSV has {len(texts)} rows; truncating to {MAX_BATCH_SIZE}.")
-        texts = texts[:MAX_BATCH_SIZE]
+    if len(records) > MAX_BATCH_SIZE:
+        logger.warning(f"CSV has {len(records)} rows; truncating to {MAX_BATCH_SIZE}.")
+        records = records[:MAX_BATCH_SIZE]
 
-    logger.info(f"Processing batch of {len(texts)} reviews...")
+    available = ExplainerRegistry.available()
+    if xai_method not in available:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Method '{xai_method}' not available. Choose from: {available}",
+        )
+
+    logger.info(f"Processing batch of {len(records)} reviews with xai_method='{xai_method}'...")
 
     results: list[PredictionResponse] = []
-    for text in texts:
+    failed_rows = 0
+    first_error: str | None = None
+
+    for idx, record in enumerate(records, start=1):
         try:
-            result = run_prediction(text=text, xai_method="attention")
+            result = run_prediction(
+                text=record["text"],
+                xai_method=xai_method,
+                verified_purchase=record["verified_purchase"],
+            )
             results.append(result)
         except Exception as e:
-            logger.error(f"Skipping row due to error: {e}")
+            failed_rows += 1
+            if first_error is None:
+                first_error = str(e)
+            logger.error(f"Skipping row {idx} due to error: {e}", exc_info=True)
+
+    if not results:
+        detail = "All rows failed during processing."
+        if first_error:
+            detail = f"{detail} First error: {first_error}"
+        raise HTTPException(status_code=500, detail=detail)
+
+    if failed_rows:
+        logger.warning(
+            f"Processed {len(results)} rows successfully; {failed_rows} rows failed."
+        )
 
     # ── Summary stats ──────────────────────────────────────────────────────────
     high = sum(1 for r in results if r.risk_level == "High Risk")

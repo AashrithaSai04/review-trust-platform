@@ -1,19 +1,112 @@
 import React from 'react';
 
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const isWordLikeToken = (value) => /^[A-Za-z0-9_']+$/.test(value);
+
+const buildTokenPattern = (token) => {
+  const escaped = escapeRegex(token);
+  if (!isWordLikeToken(token)) {
+    return escaped;
+  }
+
+  // Allow common inflections so model tokens like "cool" can still match "cools"/"cooling".
+  if (token.length >= 4) {
+    return `\\b${escaped}(?:s|es|ed|ing)?\\b`;
+  }
+
+  return `\\b${escaped}\\b`;
+};
+
+const collectHighlights = (text, importantWords) => {
+  if (!text || !importantWords?.length) return [];
+
+  const candidates = importantWords
+    .filter((item) => Array.isArray(item) && item.length >= 2)
+    .map(([word, weight]) => ({
+      word: String(word ?? '').trim(),
+      weight: Number(weight) || 0,
+    }))
+    .filter((item) => item.word.length > 0)
+    .sort((a, b) => b.word.length - a.word.length || b.weight - a.weight);
+
+  const allMatches = [];
+
+  for (const item of candidates) {
+    const pattern = buildTokenPattern(item.word);
+    const regex = new RegExp(pattern, 'gi');
+
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      allMatches.push({
+        start: match.index,
+        end: match.index + match[0].length,
+        weight: item.weight,
+      });
+
+      if (regex.lastIndex === match.index) {
+        regex.lastIndex += 1;
+      }
+    }
+  }
+
+  const occupied = new Array(text.length).fill(false);
+  const selected = [];
+
+  for (const match of allMatches) {
+    let overlaps = false;
+    for (let i = match.start; i < match.end; i += 1) {
+      if (occupied[i]) {
+        overlaps = true;
+        break;
+      }
+    }
+
+    if (overlaps) continue;
+
+    for (let i = match.start; i < match.end; i += 1) {
+      occupied[i] = true;
+    }
+    selected.push(match);
+  }
+
+  return selected.sort((a, b) => a.start - b.start);
+};
+
 const HighlightText = ({ text, importantWords }) => {
   if (!text) return null;
   if (!importantWords || importantWords.length === 0) return <span className="text-gray-300">{text}</span>;
 
-  const wordMap = new Map(importantWords.map(([word, weight]) => [word.toLowerCase(), weight]));
-  const tokens = text.split(/(\b[\w']+\b)/g);
+  const highlights = collectHighlights(text, importantWords);
+
+  if (highlights.length === 0) {
+    return <span className="text-gray-300">{text}</span>;
+  }
+
+  const parts = [];
+  let cursor = 0;
+
+  for (const match of highlights) {
+    if (cursor < match.start) {
+      parts.push({ type: 'plain', text: text.slice(cursor, match.start) });
+    }
+    parts.push({
+      type: 'highlight',
+      text: text.slice(match.start, match.end),
+      weight: match.weight,
+    });
+    cursor = match.end;
+  }
+
+  if (cursor < text.length) {
+    parts.push({ type: 'plain', text: text.slice(cursor) });
+  }
 
   return (
     <div className="leading-relaxed text-lg text-gray-300 font-light">
-      {tokens.map((token, index) => {
-        const lowerToken = token.toLowerCase();
-        const weight = wordMap.get(lowerToken);
-
-        if (weight !== undefined) {
+      {parts.map((part, index) => {
+        if (part.type === 'highlight') {
+          const weight = part.weight;
           let styleClasses = 'bg-yellow-500/20 text-yellow-300 border-b border-yellow-400/50';
           if (weight > 0.8) {
             styleClasses = 'bg-rose-500/30 text-rose-300 border-b-2 border-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)] font-medium animate-pulse';
@@ -24,18 +117,14 @@ const HighlightText = ({ text, importantWords }) => {
           return (
             <span
               key={index}
-              className={`relative group px-1 rounded-t-sm cursor-crosshair transition-all duration-300 hover:bg-opacity-50 ${styleClasses}`}
+              className={`px-1 rounded-t-sm transition-all duration-300 ${styleClasses}`}
             >
-              {token}
-              <span className="absolute bottom-[110%] left-1/2 -translate-x-1/2 mb-1 px-3 py-1.5 text-xs font-bold text-white bg-slate-800 rounded-lg opacity-0 -translate-y-2 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-200 whitespace-nowrap z-50 shadow-xl border border-white/10 backdrop-blur-md pointer-events-none">
-                AI Score: {(weight * 100).toFixed(0)}%
-                <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-800"></div>
-              </span>
+              {part.text}
             </span>
           );
         }
 
-        return <span key={index} className="px-[1px]">{token}</span>;
+        return <span key={index} className="px-[1px]">{part.text}</span>;
       })}
     </div>
   );
